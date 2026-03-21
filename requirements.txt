@@ -1,0 +1,11 @@
+torch>=2.2
+numpy>=1.26
+PyYAML>=6.0
+tqdm>=4.66
+einops>=0.8
+open3d>=0.18
+trimesh>=4.1
+scikit-image>=0.22
+scipy>=1.11
+hilbertcurve>=2.0
+mamba-ssm>=2.2.2

@@ -1,0 +1,33 @@
+dataset:
+  root: data/Teeth3DS+
+  points_per_tooth: 1024
+  teeth_per_jaw: 16
+  include_normals: true
+  normal_radius: 0.1
+  normal_max_nn: 30
+
+stage2:
+  batch_size: 8
+  epochs: 300
+  learning_rate: 0.0001
+  weight_decay: 0.00001
+  num_workers: 4
+  latent_dim: 512
+  latent_tokens: 16
+  token_dim: 32
+  condition_dim: 256
+  hidden_dim: 256
+  num_layers: 6
+  vae_kl_weight: 0.0001
+  num_query_points: 4096
+  grid_resolution: 128
+  diffusion_steps: 800
+  beta_start: 0.0001
+  beta_end: 0.02
+
+runtime:
+  seed: 42
+  device: cuda
+  output_dir: outputs/stage2
+  log_interval: 20
+  checkpoint_interval: 10

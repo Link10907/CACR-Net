@@ -69,16 +69,57 @@ Key ablation findings:
 
 ## Repository Status
 
-This repository is currently being organized. The following components will be released progressively:
+The repository now contains a full project scaffold for the two-stage pipeline:
 
-- [ ] training code
-- [ ] inference code
-- [ ] pretrained checkpoints
-- [ ] data preprocessing scripts
-- [ ] evaluation scripts
-- [ ] visualization utilities
+- Teeth3DS+ dataset loader for `upper_teeth.txt / upper_label.txt / lower_teeth.txt / lower_label.txt`
+- Stage-1 `CMDen-Net` with tooth-wise FPS, dual-branch geometric enhancement, SMN-style serialization, and point pyramid decoding
+- Stage-1 losses for multi-resolution Chamfer distance, CGOC, and non-penetration
+- Stage-2 latent SDF VAE, DDPM scheduler, FiLM-conditioned Mamba denoiser, and mesh extraction path
+- Training scripts for stage 1 and stage 2, plus mesh inference
 
-Code and trained models will be released after paper acceptance.
+This is a faithful engineering reproduction of the method flow described in the paper. It is intended as a strong implementation baseline and may still require further tuning to exactly match the reported metrics.
+
+## Installation
+
+Create an environment and install the dependencies listed in [requirements.txt](requirements.txt).
+
+```bash
+pip install -r requirements.txt
+```
+
+## Code Structure
+
+- `cacrnet/data`: Teeth3DS+ dataset parsing and case assembly
+- `cacrnet/models`: CMDen-Net, latent SDF VAE, SDFDiff-Net, and the integrated CACR-Net wrapper
+- `cacrnet/losses`: Chamfer, CGOC, and non-penetration losses
+- `cacrnet/diffusion`: DDPM scheduler and timestep embeddings
+- `scripts`: stage-1 training, stage-2 training, and inference entry points
+- `configs`: default YAML configs for training and inference
+
+## Usage
+
+Stage 1:
+
+```bash
+python scripts/train_stage1.py --config configs/stage1.yaml
+```
+
+Stage 2:
+
+```bash
+python scripts/train_stage2.py --config configs/stage2.yaml --stage1_ckpt outputs/stage1/stage1_epoch_300.pt
+```
+
+Inference:
+
+```bash
+python scripts/infer_mesh.py \
+  --config configs/infer.yaml \
+  --stage1_ckpt outputs/stage1/stage1_epoch_300.pt \
+  --vae_ckpt outputs/stage2/vae_epoch_300.pt \
+  --diff_ckpt outputs/stage2/diff_epoch_300.pt \
+  --output outputs/infer/sample.obj
+```
 
 ## Citation
 
@@ -96,3 +137,4 @@ If you find this repository useful, please cite the paper below. The BibTeX entr
 
 - [Teeth3DS / Teeth3DS+](https://osf.io/xctdy/)
 - Prior reconstruction baselines including PF-Net, FSC, AdaPoinTr, and PDCNet
+- Official reference repositories used for implementation guidance: PointCloudMamba, PF-Net, and Diffusion-SDF

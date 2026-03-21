@@ -1,0 +1,9 @@
+dataset:
+  root: data/Teeth3DS+
+  points_per_tooth: 1024
+  teeth_per_jaw: 16
+  include_normals: true
+
+runtime:
+  device: cuda
+  output_dir: outputs/infer
