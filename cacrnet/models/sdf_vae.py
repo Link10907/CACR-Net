@@ -9,6 +9,8 @@ from cacrnet.models.common.pointnet import PointNetEncoder
 
 
 class SDFDecoder(nn.Module):
+    """Decoder D: maps latent z + query xyz -> SDF value (paper Sec III-B)."""
+
     def __init__(self, latent_dim: int = 512, hidden_dim: int = 256):
         super().__init__()
         self.net = nn.Sequential(
@@ -22,11 +24,25 @@ class SDFDecoder(nn.Module):
         )
 
     def forward(self, latent: torch.Tensor, query_xyz: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            latent: (B, latent_dim) latent representation
+            query_xyz: (B, Q, 3) query 3D coordinates
+
+        Returns:
+            sdf: (B, Q, 1) predicted SDF values
+        """
         latent_expanded = latent.unsqueeze(1).expand(-1, query_xyz.shape[1], -1)
         return self.net(torch.cat([latent_expanded, query_xyz], dim=-1))
 
 
 class LatentSDFVAE(nn.Module):
+    """Variational autoencoder for latent SDF space (paper Sec III-B, Eq. 9).
+
+    Encoder E: crown point cloud -> (mu, logvar) -> z via reparameterization
+    Decoder D: z + query_xyz -> SDF values
+    """
+
     def __init__(self, latent_dim: int = 512, hidden_dim: int = 256, in_channels: int = 6):
         super().__init__()
         self.encoder = PointNetEncoder(in_channels=in_channels, hidden_dim=hidden_dim, out_dim=hidden_dim)
@@ -58,6 +74,7 @@ class LatentSDFVAE(nn.Module):
         sdf_pred = self.decode(latent, query_xyz)
         output = {"latent": latent, "mu": mu, "logvar": logvar, "sdf_pred": sdf_pred}
         if sdf_targets is not None:
+            # Eq. 9: L1 reconstruction + KL divergence
             recon = torch.nn.functional.l1_loss(sdf_pred, sdf_targets)
             kl = -0.5 * torch.mean(1 + logvar - mu.pow(2) - logvar.exp())
             output["recon_loss"] = recon

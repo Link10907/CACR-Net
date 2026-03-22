@@ -11,10 +11,12 @@ except Exception:  # pragma: no cover - optional dependency
 
 
 def _voxelize(xyz: torch.Tensor, resolution: int) -> torch.Tensor:
-    mins = xyz.min(dim=1, keepdim=True).values
-    maxs = xyz.max(dim=1, keepdim=True).values
-    coords = (xyz - mins) / (maxs - mins).clamp_min(1e-6)
-    coords = coords.clamp(0.0, 1.0 - 1e-6)
+    """Map normalized [0, 1] coordinates to integer voxel indices (Eq. 1).
+
+    (x^v, y^v, z^v) = int((x^s, y^s, z^s) * V)
+    """
+    # Clamp to [0, 1] then map to grid
+    coords = xyz.clamp(0.0, 1.0 - 1e-6)
     return (coords * resolution).long().clamp(min=0, max=resolution - 1)
 
 
@@ -29,30 +31,50 @@ def _morton_part1by2(n: torch.Tensor) -> torch.Tensor:
 
 
 def _z_order_index(grid_xyz: torch.Tensor) -> torch.Tensor:
+    """Z-order (Morton) curve index."""
     x, y, z = grid_xyz.unbind(dim=-1)
     return _morton_part1by2(x) | (_morton_part1by2(y) << 1) | (_morton_part1by2(z) << 2)
 
 
 def _raster_index(grid_xyz: torch.Tensor, resolution: int) -> torch.Tensor:
+    """Row-major raster scan index."""
     x, y, z = grid_xyz.unbind(dim=-1)
     return x * resolution * resolution + y * resolution + z
 
 
 def _zigzag_index(grid_xyz: torch.Tensor, resolution: int) -> torch.Tensor:
+    """Zigzag (boustrophedon) scan index."""
     x, y, z = grid_xyz.unbind(dim=-1)
     zig_y = torch.where(x % 2 == 0, y, (resolution - 1) - y)
     zig_z = torch.where((x + y) % 2 == 0, z, (resolution - 1) - z)
     return x * resolution * resolution + zig_y * resolution + zig_z
 
 
-def _hilbert_index(grid_xyz: torch.Tensor, resolution: int) -> torch.Tensor:
+def _hilbert_index_batch(grid_xyz: torch.Tensor, resolution: int) -> torch.Tensor:
+    """Hilbert curve index, properly handling batched (B, N, 3) input."""
     if HilbertCurve is None:
         return _z_order_index(grid_xyz)
+
     bits = max(1, (resolution - 1).bit_length())
     curve = HilbertCurve(bits, 3)
-    coords = grid_xyz.detach().cpu().tolist()
-    distance = [curve.distance_from_point(list(map(int, c))) for c in coords]
-    return torch.tensor(distance, device=grid_xyz.device, dtype=torch.long)
+
+    if grid_xyz.ndim == 2:
+        # unbatched (N, 3)
+        coords = grid_xyz.detach().cpu().tolist()
+        distances = [curve.distance_from_point(list(map(int, c))) for c in coords]
+        return torch.tensor(distances, device=grid_xyz.device, dtype=torch.long)
+    else:
+        # batched (B, N, 3)
+        B, N, _ = grid_xyz.shape
+        result = torch.empty(B, N, device=grid_xyz.device, dtype=torch.long)
+        coords_np = grid_xyz.detach().cpu()
+        for b in range(B):
+            distances = [
+                curve.distance_from_point(list(map(int, coords_np[b, i].tolist())))
+                for i in range(N)
+            ]
+            result[b] = torch.tensor(distances, dtype=torch.long)
+        return result
 
 
 def serialize_sequence(
@@ -60,9 +82,21 @@ def serialize_sequence(
     scheme: str,
     resolution: int,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
+    """Serialize point cloud into 1-D sequence via space-filling curve.
+
+    Args:
+        xyz: (B, N, 3) point coordinates (expected in [0, 1] range)
+        scheme: one of "hilbert", "z_order", "raster", "zigzag"
+        resolution: voxel grid resolution V (paper uses 64^3)
+
+    Returns:
+        order: (B, N) sorting indices
+        inverse: (B, N) inverse permutation to restore original order
+    """
     grid_xyz = _voxelize(xyz, resolution)
+
     if scheme == "hilbert":
-        order_key = _hilbert_index(grid_xyz, resolution)
+        order_key = _hilbert_index_batch(grid_xyz, resolution)
     elif scheme == "z_order":
         order_key = _z_order_index(grid_xyz)
     elif scheme == "raster":

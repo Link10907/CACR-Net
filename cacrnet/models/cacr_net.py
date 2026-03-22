@@ -14,6 +14,12 @@ from cacrnet.utils.sdf import build_query_grid, extract_mesh_from_sdf_grid
 
 
 class CACRNet(nn.Module):
+    """CACR-Net: full two-stage pipeline (Fig. 1).
+
+    Stage 1 (CMDen-Net): intraoral scan -> initial crown point cloud
+    Stage 2 (SDFDiff-Net): latent SDF diffusion -> closed crown mesh
+    """
+
     def __init__(
         self,
         stage1: CMDenNet,
@@ -45,17 +51,26 @@ class CACRNet(nn.Module):
         batch: Dict[str, torch.Tensor],
         grid_resolution: int = 128,
     ) -> Dict[str, np.ndarray]:
+        """Full inference pipeline: scan -> point cloud -> SDF -> mesh."""
         stage1_out = self.forward_stage1(batch)
         pred_crown = stage1_out["high"]
 
-        latent = torch.randn(pred_crown.shape[0], self.stage2_vae.latent_dim, device=pred_crown.device)
+        # Iterative denoising from z_T ~ N(0, I) down to z_0
+        latent = torch.randn(
+            pred_crown.shape[0], self.stage2_vae.latent_dim, device=pred_crown.device
+        )
         for step in reversed(range(self.scheduler.steps)):
-            timestep = torch.full((pred_crown.shape[0],), step, device=pred_crown.device, dtype=torch.long)
+            timestep = torch.full(
+                (pred_crown.shape[0],), step, device=pred_crown.device, dtype=torch.long
+            )
             noise_pred = self.forward_stage2(latent, timestep, pred_crown, batch["antagonist"])
             latent = self.scheduler.p_step(latent, timestep, noise_pred)
 
-        query_grid = build_query_grid(grid_resolution, device=pred_crown.device).unsqueeze(0).expand(pred_crown.shape[0], -1, -1)
+        # Decode latent SDF and extract mesh via Marching Cubes
+        query_grid = build_query_grid(grid_resolution, device=pred_crown.device)
+        query_grid = query_grid.unsqueeze(0).expand(pred_crown.shape[0], -1, -1)
         sdf = self.stage2_vae.decode(latent, query_grid)
-        sdf_grid = sdf[0].reshape(grid_resolution, grid_resolution, grid_resolution).detach().cpu().numpy()
+        sdf_grid = sdf[0].reshape(grid_resolution, grid_resolution, grid_resolution)
+        sdf_grid = sdf_grid.detach().cpu().numpy()
         verts, faces = extract_mesh_from_sdf_grid(sdf_grid, level=0.0)
         return {"vertices": verts, "faces": faces}

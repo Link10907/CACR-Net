@@ -36,12 +36,18 @@ def compute_stage2_losses(
     batch: Dict[str, torch.Tensor],
     cfg,
 ) -> Dict[str, torch.Tensor]:
+    device = batch["target_points"].device
+
+    # Sample SDF query points and estimate GT SDF values
     query_xyz = sample_sdf_queries(batch["target_xyz"], num_queries=cfg.num_query_points)
     sdf_target = estimate_point_sdf(query_xyz, batch["target_xyz"], batch["target_points"][..., 3:6])
+
+    # VAE forward: encode GT crown -> latent -> decode to SDF
     vae_out = vae(batch["target_points"], query_xyz, sdf_targets=sdf_target)
 
-    timesteps = scheduler.sample_timesteps(batch["target_points"].shape[0], batch["target_points"].device)
-    latent_noisy, noise = scheduler.q_sample(vae_out["latent"], timesteps)
+    # Diffusion: add noise to latent and train denoiser
+    timesteps = scheduler.sample_timesteps(batch["target_points"].shape[0], device)
+    latent_noisy, noise = scheduler.q_sample(vae_out["latent"].detach(), timesteps)
     noise_pred = denoiser(
         latent_noisy,
         timesteps,
@@ -49,7 +55,10 @@ def compute_stage2_losses(
         batch["antagonist"],
     )
     diffusion_loss = torch.nn.functional.mse_loss(noise_pred, noise)
+
+    # VAE loss (Eq. 9)
     vae_loss = vae_out["recon_loss"] + cfg.vae_kl_weight * vae_out["kl_loss"]
+
     return {
         "loss": vae_loss + diffusion_loss,
         "loss_vae": vae_loss,

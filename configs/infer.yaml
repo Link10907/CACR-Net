@@ -1,8 +1,30 @@
 dataset:
   root: data/Teeth3DS+
-  points_per_tooth: 1024
+  points_per_tooth: 2048
   teeth_per_jaw: 16
   include_normals: true
+
+stage1:
+  point_dim: 6
+  hidden_dim: 128
+  global_dim: 512
+  voxel_resolution: 64
+  k_neighbors: 32
+  low_points: 512
+  mid_points: 1024
+  high_points: 2048
+
+stage2:
+  latent_dim: 512
+  latent_tokens: 16
+  token_dim: 32
+  condition_dim: 256
+  hidden_dim: 256
+  num_layers: 6
+  grid_resolution: 128
+  diffusion_steps: 800
+  beta_start: 0.0001
+  beta_end: 0.02
 
 runtime:
   device: cuda

@@ -1,11 +1,17 @@
 __pycache__/
 *.pyc
 *.pyo
+*.egg-info/
+dist/
+build/
 *.obj
 *.ply
 *.stl
 *.pt
 *.pth
 outputs/
+data/
 .idea/
 .vscode/
+*.log
+.DS_Store

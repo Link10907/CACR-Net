@@ -1,16 +1,13 @@
 dataset:
   root: data/Teeth3DS+
-  points_per_tooth: 1024
+  points_per_tooth: 2048
   teeth_per_jaw: 16
   include_normals: true
   normal_radius: 0.1
   normal_max_nn: 30
-  low_points: 256
-  mid_points: 512
-  high_points: 1024
 
 stage1:
-  batch_size: 8
+  batch_size: 16
   epochs: 300
   learning_rate: 0.0001
   weight_decay: 0.00001
@@ -20,9 +17,9 @@ stage1:
   global_dim: 512
   voxel_resolution: 64
   k_neighbors: 32
-  low_points: 256
-  mid_points: 512
-  high_points: 1024
+  low_points: 512
+  mid_points: 1024
+  high_points: 2048
   alpha_low: 0.2
   alpha_mid: 0.4
   lambda_cd: 0.5

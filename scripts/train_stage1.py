@@ -13,11 +13,15 @@ from cacrnet.engine.stage1 import build_stage1_model, compute_stage1_losses
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Train CMDen-Net for CACR-Net.")
+    parser = argparse.ArgumentParser(description="Train CMDen-Net (Stage 1) for CACR-Net.")
     parser.add_argument("--config", type=str, default="configs/stage1.yaml")
     args = parser.parse_args()
 
     project_cfg = load_config(args.config)
+
+    # Reproducibility
+    torch.manual_seed(project_cfg.runtime.seed)
+
     dataset = Teeth3DSPlusDataset(
         root=project_cfg.dataset.root,
         points_per_tooth=project_cfg.dataset.points_per_tooth,
@@ -31,14 +35,14 @@ def main() -> None:
         batch_size=project_cfg.stage1.batch_size,
         shuffle=True,
         num_workers=project_cfg.stage1.num_workers,
+        pin_memory=True,
     )
 
     device = torch.device(project_cfg.runtime.device)
     model = build_stage1_model(project_cfg.stage1).to(device)
-    optimizer = torch.optim.AdamW(
+    optimizer = torch.optim.Adam(
         model.parameters(),
         lr=project_cfg.stage1.learning_rate,
-        weight_decay=project_cfg.stage1.weight_decay,
     )
 
     output_dir = Path(project_cfg.runtime.output_dir)
@@ -54,10 +58,16 @@ def main() -> None:
             optimizer.zero_grad(set_to_none=True)
             losses["loss"].backward()
             optimizer.step()
-            progress.set_postfix(loss=float(losses["loss"].detach().cpu()))
+            progress.set_postfix(
+                loss=f'{losses["loss"].item():.4f}',
+                cd=f'{losses["loss_cd"].item():.4f}',
+                pen=f'{losses["penetration_rate"].item():.3f}',
+            )
 
         if (epoch + 1) % project_cfg.runtime.checkpoint_interval == 0:
-            torch.save(model.state_dict(), output_dir / f"stage1_epoch_{epoch + 1:03d}.pt")
+            ckpt_path = output_dir / f"stage1_epoch_{epoch + 1:03d}.pt"
+            torch.save(model.state_dict(), ckpt_path)
+            print(f"Saved checkpoint: {ckpt_path}")
 
 
 if __name__ == "__main__":

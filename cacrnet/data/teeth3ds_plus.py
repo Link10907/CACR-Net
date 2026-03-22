@@ -26,10 +26,10 @@ def _read_labels(path: str) -> np.ndarray:
 
 def _discover_cases(root: str) -> List[str]:
     required = ("upper_teeth.txt", "upper_label.txt", "lower_teeth.txt", "lower_label.txt")
-    candidates = []
     if all(os.path.exists(os.path.join(root, name)) for name in required):
         return [root]
 
+    candidates = []
     for item in sorted(os.listdir(root)):
         case_dir = os.path.join(root, item)
         if not os.path.isdir(case_dir):
@@ -43,18 +43,28 @@ def _discover_cases(root: str) -> List[str]:
 
 @dataclass
 class JawData:
-    blocks: np.ndarray
-    labels: np.ndarray
-    valid_blocks: List[int]
-    centroid: np.ndarray
-    scale: float
+    blocks: np.ndarray      # (T, P, C) per-tooth point clouds
+    labels: np.ndarray       # (T,) FDI tooth IDs
+    valid_blocks: List[int]  # indices of non-empty teeth
+    min_corner: np.ndarray   # normalization offset for denormalization
+    scale: float             # normalization scale for denormalization
 
 
 class Teeth3DSPlusDataset(Dataset):
+    """Dataset for Teeth3DS+ intraoral scans (paper Sec IV-A-1).
+
+    Each sample represents one tooth removed from a single-arch scan.
+    Returns the masked arch (input), the removed tooth (GT), and the
+    antagonist arch for conditioning.
+
+    Point clouds are normalized to [0, 1] (paper: "all point clouds are
+    normalized to [0, 1]").
+    """
+
     def __init__(
         self,
         root: str,
-        points_per_tooth: int = 1024,
+        points_per_tooth: int = 2048,
         teeth_per_jaw: int = 16,
         include_normals: bool = True,
         normal_radius: float = 0.1,
@@ -94,9 +104,11 @@ class Teeth3DSPlusDataset(Dataset):
                 f"points_per_tooth={self.points_per_tooth}"
             )
 
-        xyz, centroid, scale = normalize_point_cloud(xyz)
+        # Normalize to [0, 1] (paper Sec IV-A-1)
+        xyz, min_corner, scale = normalize_point_cloud(xyz)
         blocks_xyz = xyz.reshape(labels.shape[0], self.points_per_tooth, 3)
 
+        # Pad to teeth_per_jaw if needed
         if blocks_xyz.shape[0] < self.teeth_per_jaw:
             pad = self.teeth_per_jaw - blocks_xyz.shape[0]
             blocks_xyz = np.concatenate(
@@ -105,6 +117,7 @@ class Teeth3DSPlusDataset(Dataset):
             )
             labels = np.concatenate([labels, np.zeros((pad,), dtype=np.int32)], axis=0)
 
+        # Estimate normals (NVC)
         if self.include_normals:
             flat_xyz = blocks_xyz.reshape(-1, 3)
             nonzero = np.any(flat_xyz != 0, axis=1)
@@ -119,6 +132,7 @@ class Teeth3DSPlusDataset(Dataset):
         else:
             blocks = blocks_xyz
 
+        # Identify valid (non-empty) teeth
         valid = []
         for tooth_idx, tooth_id in enumerate(labels):
             if int(tooth_id) == 0:
@@ -131,7 +145,7 @@ class Teeth3DSPlusDataset(Dataset):
             blocks=blocks.astype(np.float32),
             labels=labels.astype(np.int32),
             valid_blocks=valid,
-            centroid=centroid,
+            min_corner=min_corner,
             scale=scale,
         )
 
@@ -146,10 +160,14 @@ class Teeth3DSPlusDataset(Dataset):
         jaw_data = self.cache[case_idx][jaw_key]
         antagonist_data = self.cache[case_idx][other_key]
 
+        # Ground-truth: the removed tooth
         target_points = jaw_data.blocks[tooth_block_idx].copy()
+
+        # Input arch: zero out the removed tooth site
         masked_arch = jaw_data.blocks.copy()
         masked_arch[tooth_block_idx] = 0.0
 
+        # Environment: same-arch teeth (masked) + all antagonist teeth
         env_points = np.concatenate(
             [
                 masked_arch.reshape(-1, masked_arch.shape[-1]),
@@ -172,6 +190,6 @@ class Teeth3DSPlusDataset(Dataset):
             "jaw_flag": torch.tensor(jaw_flag, dtype=torch.long),
             "tooth_block_idx": torch.tensor(tooth_block_idx, dtype=torch.long),
             "tooth_id": torch.tensor(int(jaw_data.labels[tooth_block_idx]), dtype=torch.long),
-            "centroid": torch.from_numpy(jaw_data.centroid).float(),
+            "min_corner": torch.from_numpy(jaw_data.min_corner).float(),
             "scale": torch.tensor(jaw_data.scale, dtype=torch.float32),
         }
